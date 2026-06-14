@@ -1,0 +1,873 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  ShieldAlert, 
+  Wallet, 
+  PieChart, 
+  ShoppingBag, 
+  Plus, 
+  AlertTriangle, 
+  CheckCircle, 
+  Clock, 
+  Target, 
+  BookOpen, 
+  Settings, 
+  Briefcase, 
+  ChevronRight, 
+  X, 
+  ImagePlus, 
+  CalendarDays,
+  BookMarked
+} from 'lucide-react';
+
+// --- 預設常數 ---
+const INCOME_CAT = ['打工', '獎學金', '零用錢', '接案', '其他'];
+const HOURLY_WAGE = 183;
+// 圓餅圖顏色庫
+const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#64748b'];
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // --- 狀態管理：財務與設定 ---
+  const [budget, setBudget] = useState(15000);
+  const [expenseCategories, setExpenseCategories] = useState(['食', '衣', '住', '行', '育', '樂']);
+  const [allocations, setAllocations] = useState({ 食: 40, 衣: 10, 住: 20, 行: 10, 育: 10, 樂: 10 });
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  // 動態取得當前月份 (YYYY-MM)
+  const currentMonthStr = new Date().toISOString().split('T')[0].substring(0, 7);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
+
+  const [transactions, setTransactions] = useState([
+    { id: 1, type: 'income', name: '家教打工', amount: 4000, category: '打工', date: `${currentMonthStr}-01` },
+    { id: 2, type: 'expense', name: '午餐', amount: 120, category: '食', date: `${currentMonthStr}-01` },
+    { id: 3, type: 'expense', name: '捷運月票', amount: 1200, category: '行', date: `${currentMonthStr}-02` },
+    { id: 4, type: 'expense', name: '看電影', amount: 350, category: '樂', date: `${currentMonthStr}-05` }
+  ]);
+  
+  // --- 狀態管理：長期夢想 ---
+  const [dream, setDream] = useState({ active: true, name: '去日本交換半學期', cost: 150000, saved: 35000 });
+  const [showSettings, setShowSettings] = useState(false);
+
+  // --- 狀態管理：購物審查器 ---
+  const [assessItem, setAssessItem] = useState({ name: '', amount: '', category: '樂' });
+  const [isAssessing, setIsAssessing] = useState(false);
+  const [assessmentResult, setAssessmentResult] = useState(null);
+  const [showEarningPlan, setShowEarningPlan] = useState(false);
+
+  // --- 狀態管理：時間投資 ---
+  const [currentTimeInput, setCurrentTimeInput] = useState({ 睡眠: 7, 學習上課: 6, 打工: 3, 娛樂: 4, 社交: 2, 雜事: 2 });
+  const [timeRecords, setTimeRecords] = useState([
+    { id: 1, date: `${currentMonthStr}-01`, allocations: { 睡眠: 7, 學習上課: 6, 打工: 3, 娛樂: 4, 社交: 2, 雜事: 2 } },
+    { id: 2, date: `${currentMonthStr}-02`, allocations: { 睡眠: 6, 學習上課: 8, 打工: 0, 娛樂: 5, 社交: 3, 雜事: 2 } }
+  ]);
+  const timeTotal = Object.values(currentTimeInput).reduce((a, b) => a + Number(b), 0);
+
+  // --- 狀態管理：觀察日誌與側邊欄 ---
+  const [journals, setJournals] = useState([
+    { id: 1, date: `${currentMonthStr}-01`, title: '專案啟動的第一天', content: '今天記錄了一整天的生活。其實只要靜下心來觀察自己，就會發現許多平時忽略的細節。不再只是記帳，也記錄下青春的模樣。', imageUrl: null }
+  ]);
+  const [newJournal, setNewJournal] = useState({ title: '', content: '', imageUrl: null });
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false); // 側邊欄開關
+  const [selectedJournal, setSelectedJournal] = useState(null); // 當前檢視的詳細日誌
+
+  // --- 輔助函數：月份分組 ---
+  const groupByMonth = (items) => {
+    return items.reduce((acc, item) => {
+      const month = item.date.substring(0, 7);
+      if (!acc[month]) acc[month] = [];
+      acc[month].push(item);
+      return acc;
+    }, {});
+  };
+
+  // --- 財務計算邏輯 ---
+  const getCategorySpent = (cat, month = null) => {
+    return transactions
+      .filter(t => t.type === 'expense' && t.category === cat && (!month || t.date.startsWith(month)))
+      .reduce((sum, t) => sum + t.amount, 0);
+  };
+  const getCategoryBudget = (cat) => (budget * (allocations[cat] || 0)) / 100;
+  const getTotalIncome = (month = null) => transactions.filter(t => t.type === 'income' && (!month || t.date.startsWith(month))).reduce((sum, t) => sum + t.amount, 0);
+  const getTotalExpense = (month = null) => transactions.filter(t => t.type === 'expense' && (!month || t.date.startsWith(month))).reduce((sum, t) => sum + t.amount, 0);
+
+  // 圓餅圖資料生成
+  const pieChartData = useMemo(() => {
+    const expensesThisMonth = transactions.filter(t => t.type === 'expense' && t.date.startsWith(selectedMonth));
+    const totalSpent = expensesThisMonth.reduce((sum, t) => sum + t.amount, 0);
+    if (totalSpent === 0) return null;
+
+    let cumulativePercent = 0;
+    return expenseCategories.map((cat, index) => {
+      const spent = getCategorySpent(cat, selectedMonth);
+      if (spent === 0) return null;
+      const percent = (spent / totalSpent) * 100;
+      const start = cumulativePercent;
+      cumulativePercent += percent;
+      return { cat, spent, percent, start, end: cumulativePercent, color: COLORS[index % COLORS.length] };
+    }).filter(Boolean);
+  }, [transactions, selectedMonth, expenseCategories]);
+
+  // 生成圓餅圖 Conic Gradient 字串
+  const pieGradient = pieChartData 
+    ? `conic-gradient(${pieChartData.map(d => `${d.color} ${d.start}% ${d.end}%`).join(', ')})`
+    : '';
+
+  // --- 處理新增與設定 ---
+  const handleAddCategory = () => {
+    if (newCategoryName.trim() && !expenseCategories.includes(newCategoryName)) {
+      setExpenseCategories([...expenseCategories, newCategoryName.trim()]);
+      setAllocations({ ...allocations, [newCategoryName.trim()]: 0 });
+      setNewCategoryName('');
+    }
+  };
+
+  const handleAddTransaction = (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const newTx = {
+      id: Date.now(),
+      type: formData.get('type'),
+      name: formData.get('name'),
+      amount: Number(formData.get('amount')),
+      category: formData.get('category'),
+      date: new Date().toISOString().split('T')[0]
+    };
+    setTransactions([newTx, ...transactions]);
+    e.target.reset();
+  };
+
+  // --- 日誌圖片處理 ---
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const imageUrl = URL.createObjectURL(file);
+      setNewJournal({ ...newJournal, imageUrl });
+    }
+  };
+
+  // --- 時間分析邏輯 ---
+  const calculateTimeAverages = (month) => {
+    const monthRecords = timeRecords.filter(r => r.date.startsWith(month));
+    if (monthRecords.length === 0) return null;
+    const sums = { 睡眠: 0, 學習上課: 0, 打工: 0, 娛樂: 0, 社交: 0, 雜事: 0 };
+    monthRecords.forEach(record => {
+      Object.keys(record.allocations).forEach(key => { sums[key] += Number(record.allocations[key] || 0); });
+    });
+    const averages = {};
+    Object.keys(sums).forEach(key => { averages[key] = (sums[key] / monthRecords.length).toFixed(1); });
+    return averages;
+  };
+  const currentMonthTimeAverages = calculateTimeAverages(currentMonthStr);
+
+  const getDailyTimeComment = (allocations) => {
+    if (allocations['娛樂'] > allocations['學習上課']) return "娛樂時間高於學習，注意長期目標進度。";
+    if (allocations['睡眠'] < 6) return "睡眠不足 6 小時，身體正在透支。";
+    if (allocations['打工'] > 0 && allocations['學習上課'] > 0) return "打工與學習兼顧，辛苦了！";
+    return "時間分配均衡，繼續保持！";
+  };
+
+  // --- 執行購物審查 ---
+  const runAssessment = (e) => {
+    e.preventDefault();
+    setIsAssessing(true);
+    setAssessmentResult(null);
+    setShowEarningPlan(false);
+
+    setTimeout(() => {
+      const price = Number(assessItem.amount);
+      const catBudget = getCategoryBudget(assessItem.category);
+      const catSpent = getCategorySpent(assessItem.category, currentMonthStr);
+      const remainingInCat = catBudget - catSpent;
+      const hoursNeeded = Math.ceil(price / HOURLY_WAGE);
+      const dreamDelayDays = dream.active ? Math.ceil((price / (budget * 0.2)) * 30) : 0;
+
+      let result = { price, hoursNeeded, dreamDelayDays };
+
+      if (price > remainingInCat) {
+        result.status = 'rejected';
+        result.title = '防護罩擊穿！嚴重超支！';
+        result.message = `你這個月「${assessItem.category}」預算只剩 $${remainingInCat}。`;
+        result.sarcastic = `這筆錢等於你要去搖 ${hoursNeeded} 小時手搖飲。${dream.active ? `「${dream.name}」計畫也將被迫延後 ${dreamDelayDays} 天。` : ''}醒醒吧！`;
+      } else if (price > remainingInCat * 0.5) {
+        result.status = 'warning';
+        result.title = '勉強通過，但你確定嗎？';
+        result.message = `購買後，你的「${assessItem.category}」預算將所剩無幾。`;
+        result.sarcastic = `這不是小錢。問問自己：沒買會影響你的呼吸嗎？`;
+      } else {
+        result.status = 'approved';
+        result.title = '預算充足，准許購買';
+        result.message = `這筆消費在你的規劃內，適度犒賞自己是必須的。`;
+        result.sarcastic = `既然規劃好了，就安心地買吧！`;
+      }
+
+      setAssessmentResult(result);
+      setIsAssessing(false);
+    }, 1500);
+  };
+
+  // --- 渲染：設定彈窗 ---
+  const renderSettings = () => {
+    const totalAlloc = expenseCategories.reduce((sum, cat) => sum + (allocations[cat] || 0), 0);
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold text-white">自訂財務與夢想</h2>
+            <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white"><X /></button>
+          </div>
+          
+          <div className="space-y-6">
+            {/* 夢想設定 */}
+            <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-4">
+              <label className="flex items-center gap-2 text-indigo-400 font-bold">
+                <input type="checkbox" checked={dream.active} onChange={e => setDream({...dream, active: e.target.checked})} className="rounded text-indigo-500 bg-slate-800" />
+                啟用長期夢想基金
+              </label>
+              {dream.active && (
+                <div className="space-y-3">
+                  <div>
+                    <input type="text" value={dream.name} onChange={e => setDream({...dream, name: e.target.value})} placeholder="夢想名稱 (例如: 去日本交換)" className="w-full bg-slate-800 text-white p-3 rounded-lg text-sm outline-none focus:border-indigo-500 border border-transparent" />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-1/2">
+                      <label className="text-xs text-slate-500 mb-1 block">目標金額 (總花費)</label>
+                      <input type="number" value={dream.cost} onChange={e => setDream({...dream, cost: Number(e.target.value)})} className="w-full bg-slate-800 text-white p-3 rounded-lg text-sm outline-none focus:border-indigo-500 border border-transparent" />
+                    </div>
+                    <div className="w-1/2">
+                      <label className="text-xs text-slate-500 mb-1 block">目前已存 (進度條起點)</label>
+                      <input type="number" value={dream.saved} onChange={e => setDream({...dream, saved: Number(e.target.value)})} className="w-full bg-slate-800 text-white p-3 rounded-lg text-sm outline-none focus:border-indigo-500 border border-transparent" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-indigo-400/70">設定後，首頁將會顯示視覺化的夢想進度條。</p>
+                </div>
+              )}
+            </div>
+
+            {/* 預算比例設定 */}
+            <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex justify-between items-center text-slate-300 font-bold mb-2">
+                <span>各項預算比例設定</span>
+                <span className={totalAlloc === 100 ? 'text-emerald-400' : 'text-red-400'}>總和: {totalAlloc}%</span>
+              </div>
+              
+              {/* 動態類別列表 */}
+              {expenseCategories.map(cat => (
+                <div key={cat} className="flex items-center gap-3">
+                  <span className="w-10 text-sm font-bold text-slate-300">{cat}</span>
+                  <input 
+                    type="range" min="0" max="100" 
+                    value={allocations[cat] || 0} 
+                    onChange={e => setAllocations({...allocations, [cat]: Number(e.target.value)})}
+                    className="flex-1 accent-emerald-500"
+                  />
+                  <input 
+                    type="number" min="0" max="100" 
+                    value={allocations[cat] || 0} 
+                    onChange={e => setAllocations({...allocations, [cat]: Number(e.target.value)})}
+                    className="w-14 bg-slate-800 border border-slate-700 focus:border-emerald-500 text-white p-1 rounded-lg text-center text-sm outline-none"
+                  />
+                  <span className="w-4 text-right text-sm text-slate-500">%</span>
+                </div>
+              ))}
+
+              {/* 新增類別 */}
+              <div className="pt-3 mt-3 border-t border-slate-800 flex gap-2">
+                <input 
+                  type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)}
+                  placeholder="新增自訂類別 (如: 美妝)" 
+                  className="flex-1 bg-slate-800 text-white p-2 rounded-lg text-sm outline-none focus:border-emerald-500 border border-transparent"
+                />
+                <button onClick={handleAddCategory} className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm font-bold transition-colors">
+                  新增
+                </button>
+              </div>
+
+              {totalAlloc !== 100 && <p className="text-red-400 text-xs mt-2">⚠️ 比例總和必須為 100%，請調整滑桿</p>}
+            </div>
+            
+            <button onClick={() => setShowSettings(false)} disabled={totalAlloc !== 100} className="w-full bg-emerald-600 disabled:bg-slate-700 text-white py-3 rounded-xl font-bold">
+              儲存設定
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-300 font-sans pb-24">
+      <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-10">
+        <div className="max-w-md mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <ShieldAlert className="text-emerald-500" size={28} />
+            <h1 className="text-xl font-bold text-white tracking-wider">MONEY GUARD</h1>
+          </div>
+          <button onClick={() => setShowSettings(true)} className="text-slate-400 hover:text-emerald-400 transition-colors">
+            <Settings size={24} />
+          </button>
+        </div>
+      </header>
+
+      <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 pb-safe z-20">
+        <div className="max-w-md mx-auto flex justify-around p-2">
+          {[
+            { id: 'dashboard', icon: PieChart, label: '總覽' },
+            { id: 'tracker', icon: Wallet, label: '收支' },
+            { id: 'assessor', icon: ShoppingBag, label: '審查' },
+            { id: 'time', icon: Clock, label: '時間' },
+            { id: 'journal', icon: BookOpen, label: '日誌' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all ${
+                activeTab === tab.id ? 'text-emerald-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <tab.icon size={20} className="mb-1" />
+              <span className="text-[10px] font-bold">{tab.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <main className="max-w-md mx-auto p-4 space-y-6">
+        {showSettings && renderSettings()}
+
+        {/* --- 1. 總覽與圖表 (Dashboard) --- */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            {dream.active ? (
+              <div className="bg-gradient-to-br from-indigo-900 to-slate-900 border border-indigo-500/30 p-5 rounded-2xl relative">
+                <div className="flex justify-between items-end mb-4 relative z-10">
+                  <div>
+                    <div className="text-indigo-300 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
+                      <Target size={12}/> 長期夢想基金
+                    </div>
+                    <div className="text-lg font-bold text-white leading-tight">{dream.name}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xl font-black text-white">${dream.saved.toLocaleString()}</div>
+                    <div className="text-xs text-indigo-300">目標 ${dream.cost.toLocaleString()}</div>
+                  </div>
+                </div>
+                <div className="h-2 bg-slate-950/50 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full" style={{ width: `${(dream.saved / dream.cost) * 100}%` }}></div>
+                </div>
+              </div>
+            ) : (
+              <button onClick={()=>setShowSettings(true)} className="w-full bg-slate-900 border border-slate-800 border-dashed p-4 rounded-2xl text-slate-500 hover:text-emerald-400 flex flex-col items-center gap-2">
+                <Target size={24} />
+                <span className="text-sm font-bold">點擊設定你的長期夢想目標</span>
+              </button>
+            )}
+
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-sm font-bold text-slate-300">本月預算消耗比例</h3>
+                <span className="text-xs text-slate-500">總預算: ${budget}</span>
+              </div>
+              {expenseCategories.map(cat => {
+                const budgeted = getCategoryBudget(cat);
+                if(budgeted === 0) return null;
+                const spent = getCategorySpent(cat, currentMonthStr);
+                const percent = Math.min((spent / budgeted) * 100, 100) || 0;
+                const isOver = spent > budgeted;
+                return (
+                  <div key={cat} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-bold text-slate-400">{cat} ({allocations[cat]}%)</span>
+                      <span className={isOver ? 'text-red-400 font-bold' : 'text-slate-500'}>
+                        ${spent} / ${budgeted}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${isOver ? 'bg-red-500' : percent > 80 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${percent}%` }}></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* --- 2. 日常收支 (Tracker) --- */}
+        {activeTab === 'tracker' && (
+          <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+            {/* 月份選擇器與圓餅圖分析 */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-5">
+              <div className="flex justify-between items-center">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <CalendarDays size={18} className="text-emerald-500" /> 月份收支分析
+                </h3>
+                <input 
+                  type="month" 
+                  value={selectedMonth}
+                  onChange={e => setSelectedMonth(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-slate-300 p-2 rounded-lg text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="flex gap-4 items-center">
+                {/* 圓餅圖 */}
+                <div className="w-24 h-24 shrink-0 rounded-full flex items-center justify-center bg-slate-950 border-4 border-slate-800" 
+                     style={{ background: pieGradient || '#0f172a' }}>
+                  {(!pieChartData || pieChartData.length === 0) && <span className="text-xs text-slate-600 font-bold">無支出</span>}
+                </div>
+                {/* 圖例 */}
+                <div className="flex-1 grid grid-cols-2 gap-2 text-xs">
+                  {pieChartData && pieChartData.map(d => (
+                    <div key={d.cat} className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: d.color }}></div>
+                      <span className="text-slate-400 truncate">{d.cat} {Math.round(d.percent)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-800">
+                <div className="bg-slate-950 p-3 rounded-xl">
+                  <div className="text-xs text-slate-500 mb-1">實際收入</div>
+                  <div className="text-lg font-bold text-emerald-400">${getTotalIncome(selectedMonth).toLocaleString()}</div>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl">
+                  <div className="text-xs text-slate-500 mb-1">實際支出</div>
+                  <div className="text-lg font-bold text-rose-400">${getTotalExpense(selectedMonth).toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 新增表單 */}
+            <form onSubmit={handleAddTransaction} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Plus size={16} className="text-emerald-500" /> 新增紀錄
+                </h3>
+              </div>
+              <div className="flex bg-slate-950 rounded-lg p-1 border border-slate-800">
+                <label className="flex-1 text-center py-2 rounded text-sm font-bold cursor-pointer has-[:checked]:bg-rose-500/20 has-[:checked]:text-rose-400 text-slate-500 transition-colors">
+                  <input type="radio" name="type" value="expense" defaultChecked className="hidden" /> 支出
+                </label>
+                <label className="flex-1 text-center py-2 rounded text-sm font-bold cursor-pointer has-[:checked]:bg-emerald-500/20 has-[:checked]:text-emerald-400 text-slate-500 transition-colors">
+                  <input type="radio" name="type" value="income" className="hidden" /> 收入
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <input required name="name" type="text" placeholder="項目名稱 (如: 晚餐)" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-emerald-500 outline-none" />
+                </div>
+                <div>
+                  <input required name="amount" type="number" placeholder="金額" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-emerald-500 outline-none" />
+                </div>
+                <div>
+                  <select required name="category" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-emerald-500 outline-none appearance-none">
+                    <optgroup label="支出類別">
+                      {expenseCategories.map(c => <option key={`e-${c}`} value={c}>{c}</option>)}
+                    </optgroup>
+                    <optgroup label="收入類別">
+                      {INCOME_CAT.map(c => <option key={`i-${c}`} value={c}>{c}</option>)}
+                    </optgroup>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" className="w-full bg-slate-800 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-colors">儲存紀錄</button>
+            </form>
+
+            {/* 歷史紀錄 (過濾該月) */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-500 ml-1">{selectedMonth} 交易明細</h3>
+              {transactions.filter(t => t.date.startsWith(selectedMonth)).map(t => (
+                <div key={t.id} className="flex justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${t.type === 'income' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                      {t.category}
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-200">{t.name}</div>
+                      <div className="text-xs text-slate-500">{t.date}</div>
+                    </div>
+                  </div>
+                  <div className={`font-black ${t.type === 'income' ? 'text-emerald-400' : 'text-white'}`}>
+                    {t.type === 'income' ? '+' : '-'}${t.amount}
+                  </div>
+                </div>
+              ))}
+              {transactions.filter(t => t.date.startsWith(selectedMonth)).length === 0 && (
+                <div className="text-center text-slate-600 text-sm py-4">本月尚無明細</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* --- 3. 購物審判庭 --- */}
+        {activeTab === 'assessor' && (
+          <div className="space-y-6 animate-in zoom-in-95 duration-300">
+            <div className="text-center space-y-2 mb-6">
+              <h2 className="text-2xl font-black text-white">慾望防衛審判庭</h2>
+              <p className="text-sm text-slate-400">輸入你想買的昂貴物品，讓系統幫你評估代價。</p>
+            </div>
+
+            {!assessmentResult && (
+              <form onSubmit={runAssessment} className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 mb-1 block">想買什麼？</label>
+                  <input required value={assessItem.name} onChange={e=>setAssessItem({...assessItem, name: e.target.value})} placeholder="例如: PS5 遊戲機" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-lg focus:border-indigo-500 outline-none" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">多少錢？</label>
+                    <input required type="number" value={assessItem.amount} onChange={e=>setAssessItem({...assessItem, amount: e.target.value})} placeholder="$" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-lg focus:border-indigo-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">歸類</label>
+                    <select value={assessItem.category} onChange={e=>setAssessItem({...assessItem, category: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-lg focus:border-indigo-500 outline-none appearance-none">
+                      {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" disabled={isAssessing} className="w-full mt-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black py-4 rounded-xl shadow-lg transition-all disabled:opacity-50 flex justify-center items-center gap-2">
+                  {isAssessing ? <Clock className="animate-spin" /> : <ShieldAlert />}
+                  {isAssessing ? '演算中...' : '送出審查'}
+                </button>
+              </form>
+            )}
+
+            {assessmentResult && !isAssessing && !showEarningPlan && (
+              <div className={`p-6 rounded-2xl border-2 animate-in slide-in-from-bottom-4 duration-500 ${
+                assessmentResult.status === 'rejected' ? 'bg-red-950/30 border-red-500/50' : 
+                assessmentResult.status === 'warning' ? 'bg-amber-950/30 border-amber-500/50' : 'bg-emerald-950/30 border-emerald-500/50'
+              }`}>
+                <div className="flex items-start gap-4">
+                  <div className={`p-3 rounded-full mt-1 ${assessmentResult.status === 'rejected' ? 'bg-red-500/20 text-red-500' : assessmentResult.status === 'warning' ? 'bg-amber-500/20 text-amber-500' : 'bg-emerald-500/20 text-emerald-500'}`}>
+                    {assessmentResult.status === 'rejected' && <AlertTriangle size={32} />}
+                    {assessmentResult.status === 'warning' && <ShieldAlert size={32} />}
+                    {assessmentResult.status === 'approved' && <CheckCircle size={32} />}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className={`text-xl font-black mb-2 ${assessmentResult.status === 'rejected' ? 'text-red-400' : assessmentResult.status === 'warning' ? 'text-amber-400' : 'text-emerald-400'}`}>
+                      {assessmentResult.title}
+                    </h3>
+                    <p className="text-slate-300 mb-4 text-sm leading-relaxed">{assessmentResult.message}</p>
+                    
+                    <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800/50 mb-4">
+                      <p className="text-xs font-bold text-slate-400 mb-1">殘酷換算：</p>
+                      <p className="text-sm text-slate-200 italic">「{assessmentResult.sarcastic}」</p>
+                    </div>
+
+                    {assessmentResult.status === 'rejected' && (
+                      <button onClick={() => setShowEarningPlan(true)} className="w-full bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 font-bold py-3 rounded-xl transition-colors text-sm flex justify-center items-center gap-2">
+                        <Briefcase size={16} />
+                        開啟賺錢計畫以獲取購買資格
+                      </button>
+                    )}
+                    <button onClick={() => setAssessmentResult(null)} className="w-full mt-3 text-slate-500 text-sm hover:text-slate-300">重新評估</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showEarningPlan && (
+              <div className="bg-slate-900 border border-emerald-500/30 p-6 rounded-2xl animate-in fade-in zoom-in duration-300 space-y-5">
+                <div className="text-center space-y-1">
+                  <h3 className="text-xl font-bold text-emerald-400">行動計畫：啟動賺錢模式</h3>
+                  <p className="text-xs text-slate-400">選擇你的開源方案，賺取 ${assessmentResult.price}</p>
+                </div>
+                
+                <div className="space-y-3">
+                  <a href="https://bhuntr.com/tw" target="_blank" rel="noreferrer" className="flex items-center p-4 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl transition-all group">
+                    <div className="flex-1">
+                      <h4 className="font-bold text-white text-sm">設計/寫作 ➔ 獎金獵人</h4>
+                      <p className="text-xs text-slate-500 mt-1">參加比賽或徵件，發揮才藝賺獎金</p>
+                    </div>
+                    <ChevronRight className="text-slate-600 group-hover:text-emerald-400" />
+                  </a>
+                  <a href="https://www.104.com.tw/jobs/main/" target="_blank" rel="noreferrer" className="flex items-center p-4 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl transition-all group">
+                    <div className="flex-1">
+                      <h4 className="font-bold text-white text-sm">短期打工 ➔ 104人力銀行</h4>
+                      <p className="text-xs text-slate-500 mt-1">預計需排班 {assessmentResult.hoursNeeded} 小時</p>
+                    </div>
+                    <ChevronRight className="text-slate-600 group-hover:text-emerald-400" />
+                  </a>
+                </div>
+
+                <div className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-500/20 text-center">
+                  <p className="text-sm text-emerald-300 font-bold mb-3">設定目標，達成後再來審查！</p>
+                  <button onClick={() => {
+                    setAssessmentResult(null);
+                    setShowEarningPlan(false);
+                    setAssessItem({name:'', amount:'', category:'樂'});
+                    setActiveTab('dashboard');
+                  }} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg text-sm w-full transition-colors">
+                    我承諾！我會開始執行賺錢計畫
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* --- 4. 時間投資 (Time Tracker) --- */}
+        {activeTab === 'time' && (
+          <div className="space-y-6 animate-in slide-in-from-left-4 duration-300">
+            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 border border-indigo-500/30 p-6 rounded-2xl text-center">
+              <Clock className="mx-auto text-indigo-400 mb-2" size={32} />
+              <h2 className="text-xl font-black text-white">時間觀測站</h2>
+              <p className="text-sm text-slate-400 mt-1">記錄每日的 24 小時，客觀分析你的時間流向。</p>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+              <div className="flex justify-between items-center text-slate-300 font-bold mb-4">
+                <span>新增單日分配紀錄</span>
+                <span className={`px-2 py-1 rounded text-xs ${timeTotal === 24 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                  總計: {timeTotal} / 24h
+                </span>
+              </div>
+              
+              <div className="space-y-3">
+                {Object.keys(currentTimeInput).map(activity => (
+                  <div key={activity} className="flex items-center gap-3">
+                    <span className="w-16 text-sm font-medium text-slate-400">{activity}</span>
+                    <input 
+                      type="range" min="0" max="24" step="0.5"
+                      value={currentTimeInput[activity]} 
+                      onChange={e => setCurrentTimeInput({...currentTimeInput, [activity]: Number(e.target.value)})}
+                      className="flex-1 accent-indigo-500"
+                    />
+                    <input 
+                      type="number" min="0" max="24" step="0.5"
+                      value={currentTimeInput[activity]} 
+                      onChange={e => setCurrentTimeInput({...currentTimeInput, [activity]: Number(e.target.value)})}
+                      className="w-16 bg-slate-950 border border-slate-700 focus:border-indigo-500 text-white p-1 rounded-lg text-center text-sm outline-none"
+                    />
+                    <span className="text-sm text-slate-500 w-4">h</span>
+                  </div>
+                ))}
+              </div>
+
+              {timeTotal !== 24 ? (
+                <div className="bg-rose-950/30 border border-rose-500/30 p-3 rounded-lg flex items-center gap-2 text-rose-400 text-xs mt-4">
+                  <AlertTriangle size={16} /> 提醒：一天的時間總和必須剛好是 24 小時！
+                </div>
+              ) : (
+                <button onClick={() => {
+                  setTimeRecords([{ id: Date.now(), date: new Date().toISOString().split('T')[0], allocations: { ...currentTimeInput } }, ...timeRecords]);
+                }} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors text-sm">
+                  儲存今日紀錄
+                </button>
+              )}
+            </div>
+            
+            {/* 時間 analysis 報告 */}
+            {currentMonthTimeAverages && (
+              <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+                <h3 className="text-sm font-bold text-slate-300">本月客觀分析總結</h3>
+                
+                <div className="grid grid-cols-3 gap-3">
+                  {Object.keys(currentMonthTimeAverages).map(key => (
+                    <div key={key} className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                      <div className="text-xs text-slate-500 mb-1">{key}</div>
+                      <div className="font-bold text-indigo-400">{currentMonthTimeAverages[key]}<span className="text-xs text-slate-500 ml-1">h</span></div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="bg-slate-800/50 p-4 rounded-xl text-sm text-slate-300 leading-relaxed">
+                  <span className="font-bold text-slate-400">總體趨勢：</span><br />
+                  本月每日平均睡眠長度為 <span className="text-indigo-400 font-bold">{currentMonthTimeAverages['睡眠']}</span> 小時。投入最多時間於 <span className="text-emerald-400 font-bold">{Object.keys(currentMonthTimeAverages).reduce((a, b) => Number(currentMonthTimeAverages[a]) > Number(currentMonthTimeAverages[b]) ? a : b)}</span>。
+                </div>
+              </div>
+            )}
+
+            {/* 歷史逐筆紀錄與點評 */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-500 ml-1">單日點評紀錄</h3>
+              {timeRecords.slice(0, 5).map(record => (
+                <div key={record.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span className="font-bold text-indigo-400">{record.date}</span>
+                    <span>學:{record.allocations['學習上課']} 樂:{record.allocations['娛樂']} 睡:{record.allocations['睡眠']}</span>
+                  </div>
+                  <div className="text-xs text-slate-300 bg-slate-950 p-2 rounded border border-slate-800/50">
+                    💡 點評：{getDailyTimeComment(record.allocations)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* --- 5. 觀察日誌 (Journal) --- */}
+        {activeTab === 'journal' && (
+          <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+            
+            {/* 日誌編輯表單與側邊欄按鈕 */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <BookOpen className="text-emerald-500" size={20} /> 自我觀察日誌
+                </h2>
+                {/* 側邊歷史檔案按鈕 */}
+                <button 
+                  onClick={() => setIsHistoryOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-all shadow-md"
+                >
+                  <BookMarked size={14} className="text-emerald-400" />
+                  歷程檔案庫 ({journals.length})
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-400 leading-relaxed">
+                這是一個不設限的個人空間，無論是財務反思或日常瑣事，搭配照片記錄下來吧。
+              </p>
+              
+              <div className="space-y-3">
+                <input 
+                  type="text" value={newJournal.title} onChange={(e) => setNewJournal({...newJournal, title: e.target.value})}
+                  placeholder="為今天的回憶下個標題..." 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold focus:border-emerald-500 outline-none"
+                />
+                <textarea 
+                  value={newJournal.content} onChange={(e) => setNewJournal({...newJournal, content: e.target.value})}
+                  placeholder="今天發生了什麼事？有什麼想法想記錄下來？..." 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-sm focus:border-emerald-500 outline-none min-h-[150px] resize-none"
+                />
+                
+                {newJournal.imageUrl && (
+                  <div className="relative w-full h-32 rounded-xl overflow-hidden border border-slate-800">
+                    <img src={newJournal.imageUrl} alt="preview" className="w-full h-full object-cover" />
+                    <button onClick={() => setNewJournal({...newJournal, imageUrl: null})} className="absolute top-2 right-2 bg-black/50 p-1 rounded-full text-white hover:bg-black/80"><X size={16}/></button>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <label className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 p-3 rounded-xl cursor-pointer transition-colors w-14 shrink-0">
+                    <ImagePlus size={20} />
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                  </label>
+                  <button 
+                    onClick={() => {
+                      if(!newJournal.title.trim() && !newJournal.content.trim()) return;
+                      setJournals([{id: Date.now(), date: new Date().toISOString().split('T')[0], ...newJournal}, ...journals]);
+                      setNewJournal({ title: '', content: '', imageUrl: null });
+                      // 自動彈出歷程檔案庫，給予完成感
+                      setIsHistoryOpen(true);
+                    }}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-colors text-sm"
+                  >
+                    封存今天的記憶
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 精美右側滑入歷史日誌側邊欄 */}
+            {isHistoryOpen && (
+              <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+                {/* 黑色磨砂遮罩背景 */}
+                <div 
+                  className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+                  onClick={() => setIsHistoryOpen(false)}
+                />
+                
+                {/* 側邊滑出面板 */}
+                <div className="relative w-80 max-w-full bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl z-10 animate-in slide-in-from-right duration-300">
+                  <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                    <div className="flex items-center gap-2 text-white font-bold text-sm">
+                      <BookMarked size={18} className="text-emerald-400" />
+                      <span>歷程回憶檔案庫</span>
+                    </div>
+                    <button 
+                      onClick={() => setIsHistoryOpen(false)}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {/* 月份與日誌列表 */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                    {journals.length === 0 ? (
+                      <div className="text-center text-slate-500 text-xs py-12 space-y-2">
+                        <BookOpen size={24} className="mx-auto text-slate-600" />
+                        <p>尚無任何封存的記憶</p>
+                      </div>
+                    ) : (
+                      Object.entries(groupByMonth(journals)).sort((a,b) => b[0].localeCompare(a[0])).map(([month, monthJournals]) => (
+                        <div key={month} className="space-y-2">
+                          <h4 className="text-xs font-black text-slate-500 border-b border-slate-800 pb-1 flex items-center gap-1.5 uppercase tracking-wider">
+                            <CalendarDays size={12} className="text-emerald-500" /> {month}
+                          </h4>
+                          <div className="space-y-2">
+                            {monthJournals.map(j => (
+                              <button
+                                key={j.id}
+                                onClick={() => setSelectedJournal(j)}
+                                className="w-full text-left p-3 bg-slate-950/60 hover:bg-slate-800/80 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-all flex flex-col gap-1 group"
+                              >
+                                <div className="flex justify-between items-start">
+                                  <span className="font-bold text-white text-xs truncate group-hover:text-emerald-400 max-w-[150px] transition-colors">
+                                    {j.title || '無標題日誌'}
+                                  </span>
+                                  <span className="text-[9px] text-slate-500 shrink-0 font-mono mt-0.5">{j.date}</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 line-clamp-1 leading-normal">
+                                  {j.content}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 日誌細節詳細檢視彈窗 (Modal) */}
+            {selectedJournal && (
+              <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-full max-w-md max-h-[80vh] overflow-y-auto space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                        {selectedJournal.date}
+                      </span>
+                      <h3 className="text-lg font-black text-white mt-2 leading-snug">{selectedJournal.title || '無標題日誌'}</h3>
+                    </div>
+                    <button 
+                      onClick={() => setSelectedJournal(null)}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {selectedJournal.imageUrl && (
+                    <div className="rounded-xl overflow-hidden border border-slate-800">
+                      <img src={selectedJournal.imageUrl} alt="diary entry" className="w-full h-48 object-cover" />
+                    </div>
+                  )}
+
+                  <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-950 p-4 rounded-xl border border-slate-800">
+                    {selectedJournal.content}
+                  </div>
+
+                  <button 
+                    onClick={() => setSelectedJournal(null)}
+                    className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-xl text-sm font-bold transition-all border border-slate-700"
+                  >
+                    關閉檢視
+                  </button>
+                </div>
+              </div>
+            )}
+
+          </div>
+        )}
+
+      </main>
+    </div>
+  );
+}
